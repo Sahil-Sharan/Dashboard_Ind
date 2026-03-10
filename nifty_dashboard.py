@@ -8,6 +8,13 @@ st.title("NIFTY50 Valuation Dashboard")
 # ----------------------------
 # Load NIFTY50 list from NSE
 # ----------------------------
+@st.cache_data(ttl=3600)
+def get_stock_info(symbol):
+
+    ticker = yf.Ticker(symbol)
+
+    return ticker.info
+    
 @st.cache_data
 def load_nifty50():
 
@@ -29,14 +36,14 @@ stock = st.selectbox(
 )
 
 ticker = yf.Ticker(stock)
-info = ticker.info
+info = get_stock_info(stock)
 
 # ----------------------------
 # Fundamental Metrics
 # ----------------------------
 
 current_price = info.get("currentPrice")
-pe = info.get("trailingPE")
+pe = info.get("trailingPE","N/A")
 pb = info.get("priceToBook")
 forward_pe = info.get("forwardPE")
 target = info.get("targetMeanPrice")
