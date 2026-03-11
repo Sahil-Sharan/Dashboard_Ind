@@ -3,262 +3,324 @@ import pandas as pd
 import yfinance as yf
 import requests
 
-st.set_page_config(layout="wide", page_title="Indian Investor Terminal")
+st.set_page_config(page_title="Indian Investor Terminal", layout="wide")
 
 st.title("Indian Equity Investor Terminal")
 
-# -----------------------------------------------------
-# LOAD NIFTY STOCK LIST
-# -----------------------------------------------------
+# ---------------------------------------------------
+# Load NIFTY50
+# ---------------------------------------------------
 
 @st.cache_data
 def load_nifty():
-
-    url="https://archives.nseindia.com/content/indices/ind_nifty50list.csv"
-    df=pd.read_csv(url)
-    df["YahooSymbol"]=df["Symbol"]+".NS"
-
+    url = "https://archives.nseindia.com/content/indices/ind_nifty50list.csv"
+    df = pd.read_csv(url)
+    df["YahooSymbol"] = df["Symbol"] + ".NS"
     return df
 
-nifty=load_nifty()
+nifty = load_nifty()
 
-stock=st.selectbox(
+stock = st.selectbox(
     "Select Stock",
     nifty["YahooSymbol"],
     format_func=lambda x: nifty[nifty["YahooSymbol"]==x]["Company Name"].values[0]
 )
 
-ticker=yf.Ticker(stock)
+ticker = yf.Ticker(stock)
 
-# -----------------------------------------------------
-# MARKET OVERVIEW
-# -----------------------------------------------------
+# ---------------------------------------------------
+# PRICE HISTORY
+# ---------------------------------------------------
 
-st.header("Market Overview")
+hist = ticker.history(period="5y")
 
-col1,col2,col3=st.columns(3)
+price = hist["Close"].iloc[-1]
 
-nifty_index=yf.Ticker("^NSEI")
-nifty_hist=nifty_index.history(period="1y")
-
-nifty_price=nifty_hist["Close"].iloc[-1]
-
-nifty_ma200=nifty_hist["Close"].rolling(200).mean().iloc[-1]
-
-col1.metric("NIFTY50",round(nifty_price,2))
-col2.metric("200 Day Avg",round(nifty_ma200,2))
-
-if nifty_price<nifty_ma200*0.9:
-    col3.success("Market undervalued")
-
-elif nifty_price<nifty_ma200*1.1:
-    col3.warning("Market fairly valued")
-
-else:
-    col3.error("Market overvalued")
-
-# -----------------------------------------------------
-# STOCK DATA
-# -----------------------------------------------------
-
-hist=ticker.history(period="5y")
-price=hist["Close"].iloc[-1]
-
-info={}
+# ---------------------------------------------------
+# BASIC INFO
+# ---------------------------------------------------
 
 try:
-    data=ticker.get_info()
+    data = ticker.get_info()
+except:
+    data = {}
 
-    info["pe"]=data.get("trailingPE")
-    info["fpe"]=data.get("forwardPE")
-    info["pb"]=data.get("priceToBook")
-    info["div"]=data.get("dividendYield")
-    info["target"]=data.get("targetMeanPrice")
-    info["opm"]=data.get("operatingMargins")
-    info["roe"]=data.get("returnOnEquity")
-    info["growth"]=data.get("earningsGrowth")
-    info["sector"]=data.get("sector")
+pe = data.get("trailingPE")
+fpe = data.get("forwardPE")
+pb = data.get("priceToBook")
+target_mean = data.get("targetMeanPrice")
+target_high = data.get("targetHighPrice")
+target_low = data.get("targetLowPrice")
+analysts = data.get("numberOfAnalystOpinions")
+roe = data.get("returnOnEquity")
+opm = data.get("operatingMargins")
+growth = data.get("earningsGrowth")
+sector = data.get("sector")
+
+# ---------------------------------------------------
+# DIVIDEND YIELD (CORRECT)
+# ---------------------------------------------------
+
+div_rate = data.get("dividendRate")
+
+if div_rate and price:
+    div_yield = (div_rate / price) * 100
+else:
+    div_yield = None
+
+# ---------------------------------------------------
+# PEG RATIO
+# ---------------------------------------------------
+
+if pe and growth:
+    peg = pe / (growth * 100)
+else:
+    peg = None
+
+# ---------------------------------------------------
+# UPSIDE / DOWNSIDE
+# ---------------------------------------------------
+
+if target_mean and price:
+    upside = ((target_mean - price) / price) * 100
+else:
+    upside = None
+
+# ---------------------------------------------------
+# HEADER METRICS
+# ---------------------------------------------------
+
+st.subheader("Key Metrics")
+
+c1,c2,c3,c4,c5,c6 = st.columns(6)
+
+c1.metric("Price", round(price,2))
+c2.metric("PE", pe)
+c3.metric("Forward PE", fpe)
+c4.metric("PB", pb)
+c5.metric("Dividend Yield", f"{div_yield:.2f}%" if div_yield else None)
+c6.metric("PEG", peg)
+
+# ---------------------------------------------------
+# TARGET PANEL
+# ---------------------------------------------------
+
+st.subheader("Analyst Target")
+
+t1,t2,t3,t4 = st.columns(4)
+
+t1.metric("Average Target", target_mean)
+t2.metric("High Target", target_high)
+t3.metric("Low Target", target_low)
+t4.metric("Potential Upside", f"{upside:.2f}%" if upside else None)
+
+st.write("Analyst Coverage:", analysts)
+
+# ---------------------------------------------------
+# BUFFETT QUALITY SCORE
+# ---------------------------------------------------
+
+score = 0
+
+if roe and roe > 0.15:
+    score += 2
+
+if opm and opm > 0.15:
+    score += 2
+
+if pe and pe < 25:
+    score += 2
+
+if pb and pb < 5:
+    score += 2
+
+if div_yield and div_yield > 1:
+    score += 2
+
+st.subheader("Buffett Quality Score")
+
+st.metric("Score", f"{score}/10")
+
+if score >= 8:
+    st.success("High Quality Business")
+
+elif score >=5:
+    st.warning("Average Quality")
+
+else:
+    st.error("Weak Quality")
+
+# ---------------------------------------------------
+# BUY ZONE
+# ---------------------------------------------------
+
+st.subheader("Valuation Signal")
+
+ma200 = hist["Close"].rolling(200).mean().iloc[-1]
+
+buy_zone = ma200 * 0.9
+sell_zone = ma200 * 1.2
+
+b1,b2,b3 = st.columns(3)
+
+b1.metric("200 DMA", round(ma200,2))
+b2.metric("Buy Zone", round(buy_zone,2))
+b3.metric("Overvalued Zone", round(sell_zone,2))
+
+if price < buy_zone:
+    st.success("Stock in BUY zone")
+
+elif price < sell_zone:
+    st.warning("Stock fairly valued")
+
+else:
+    st.error("Stock overvalued")
+
+# ---------------------------------------------------
+# DCF INTRINSIC VALUE
+# ---------------------------------------------------
+
+st.subheader("Intrinsic Value (DCF Model)")
+
+try:
+    cashflow = ticker.cashflow
+    fcf = cashflow.loc["Free Cash Flow"].iloc[0]
+
+    growth_rate = 0.12
+    discount = 0.10
+
+    intrinsic = 0
+
+    for t in range(1,11):
+        intrinsic += (fcf*(1+growth_rate)**t)/(1+discount)**t
+
+    shares = data.get("sharesOutstanding")
+
+    intrinsic_per_share = intrinsic / shares
+
+    mos = ((intrinsic_per_share - price) / intrinsic_per_share) * 100
+
+    d1,d2 = st.columns(2)
+
+    d1.metric("Intrinsic Value", round(intrinsic_per_share,2))
+    d2.metric("Margin of Safety", f"{mos:.2f}%")
 
 except:
-    pass
+    st.write("DCF data unavailable")
 
-# PEG
-peg=None
-if info["pe"] and info["growth"]:
-    peg=info["pe"]/(info["growth"]*100)
-
-# -----------------------------------------------------
-# KEY METRICS PANEL
-# -----------------------------------------------------
-
-st.header("Stock Valuation")
-
-c1,c2,c3,c4,c5,c6=st.columns(6)
-
-c1.metric("Price",round(price,2))
-c2.metric("PE",info["pe"])
-c3.metric("Forward PE",info["fpe"])
-c4.metric("PB",info["pb"])
-c5.metric("Dividend Yield",
-          f"{info['div']*100:.2f}%" if info["div"] else None)
-c6.metric("Target Price",info["target"])
-
-c7,c8,c9=st.columns(3)
-
-c7.metric("PEG Ratio",peg)
-c8.metric("ROE",f"{info['roe']*100:.2f}%" if info["roe"] else None)
-c9.metric("Operating Margin",
-          f"{info['opm']*100:.2f}%" if info["opm"] else None)
-
-# -----------------------------------------------------
-# QUALITY + VALUATION
-# -----------------------------------------------------
-
-col1,col2=st.columns(2)
-
-# Buffett score
-score=0
-
-if info["roe"] and info["roe"]>0.15:
-    score+=2
-
-if info["opm"] and info["opm"]>0.15:
-    score+=2
-
-if info["pe"] and info["pe"]<25:
-    score+=2
-
-if info["pb"] and info["pb"]<5:
-    score+=2
-
-if info["div"]:
-    score+=2
-
-with col1:
-
-    st.subheader("Buffett Quality Score")
-
-    st.metric("Score",f"{score}/10")
-
-    if score>=8:
-        st.success("High Quality")
-
-    elif score>=5:
-        st.warning("Average")
-
-    else:
-        st.error("Weak")
-
-# buy zone
-with col2:
-
-    st.subheader("Automatic Buy Zone")
-
-    ma200=hist["Close"].rolling(200).mean().iloc[-1]
-
-    buy_zone=ma200*0.9
-    sell_zone=ma200*1.2
-
-    st.metric("Buy Price",round(buy_zone,2))
-
-    if price<buy_zone:
-        st.success("Undervalued")
-
-    elif price<sell_zone:
-        st.warning("Fair Value")
-
-    else:
-        st.error("Overvalued")
-
-# -----------------------------------------------------
+# ---------------------------------------------------
 # PRICE CHART
-# -----------------------------------------------------
+# ---------------------------------------------------
 
-st.header("Price Trend")
+st.subheader("5 Year Price Trend")
 
 st.line_chart(hist["Close"])
 
-# -----------------------------------------------------
-# SECTOR COMPARISON
-# -----------------------------------------------------
+# ---------------------------------------------------
+# NIFTY MARKET GAUGE
+# ---------------------------------------------------
 
-st.header("Sector Comparison")
+st.subheader("Market Valuation (NIFTY)")
 
-sector_stocks=nifty[nifty["YahooSymbol"]!=stock].head(10)
+nifty_index = yf.Ticker("^NSEI")
 
-sector_data=[]
+nifty_hist = nifty_index.history(period="1y")
 
-for s in sector_stocks["YahooSymbol"]:
+nifty_price = nifty_hist["Close"].iloc[-1]
 
-    try:
+nifty_ma = nifty_hist["Close"].rolling(200).mean().iloc[-1]
 
-        t=yf.Ticker(s)
+m1,m2,m3 = st.columns(3)
 
-        i=t.get_info()
+m1.metric("NIFTY", round(nifty_price,2))
+m2.metric("200 DMA", round(nifty_ma,2))
 
-        sector_data.append({
-            "stock":s,
-            "PE":i.get("trailingPE"),
-            "PB":i.get("priceToBook"),
-        })
+if nifty_price < nifty_ma*0.9:
+    m3.success("Market undervalued")
 
-    except:
-        pass
+elif nifty_price < nifty_ma*1.1:
+    m3.warning("Market fairly valued")
 
-sector_df=pd.DataFrame(sector_data)
+else:
+    m3.error("Market overvalued")
 
-st.dataframe(sector_df)
-
-# -----------------------------------------------------
+# ---------------------------------------------------
 # FII / DII FLOW
-# -----------------------------------------------------
+# ---------------------------------------------------
 
-st.header("Institutional Flow")
+st.subheader("FII / DII Activity")
 
 try:
-
-    fii=pd.read_html(
+    fii = pd.read_html(
         "https://www.moneycontrol.com/stocks/marketstats/fii_dii_activity/index.php"
     )[0]
 
     st.dataframe(fii)
 
 except:
-    st.write("FII/DII data unavailable")
+    st.write("Could not load institutional flow")
 
-# -----------------------------------------------------
+# ---------------------------------------------------
 # SHAREHOLDING
-# -----------------------------------------------------
+# ---------------------------------------------------
 
-st.header("Shareholding Pattern")
+st.subheader("Shareholding Pattern")
 
-symbol=stock.replace(".NS","")
+symbol = stock.replace(".NS","")
 
 try:
 
-    url=f"https://www.screener.in/company/{symbol}/consolidated/"
+    url = f"https://www.screener.in/company/{symbol}/consolidated/"
 
-    headers={"User-Agent":"Mozilla/5.0"}
+    headers = {"User-Agent":"Mozilla/5.0"}
 
-    html=requests.get(url,headers=headers).text
+    html = requests.get(url,headers=headers).text
 
-    tables=pd.read_html(html)
+    tables = pd.read_html(html)
 
-    holding=None
+    holding = None
 
     for table in tables:
 
-        if table.columns[0]=="Shareholders":
-
-            holding=table
+        if table.columns[0] == "Shareholders":
+            holding = table
             break
 
     if holding is not None:
 
-        holding=holding.set_index("Shareholders")
+        holding = holding.set_index("Shareholders")
 
         st.dataframe(holding)
 
-except:
+    else:
+        st.write("Shareholding data not found")
 
-    st.write("Shareholding data unavailable")
+except:
+    st.write("Could not load shareholding")
+
+# ---------------------------------------------------
+# SECTOR PE SNAPSHOT
+# ---------------------------------------------------
+
+st.subheader("Peer Valuation Snapshot")
+
+peer_data = []
+
+for s in nifty["YahooSymbol"].head(10):
+
+    try:
+        t = yf.Ticker(s)
+        i = t.get_info()
+
+        peer_data.append({
+            "Stock": s,
+            "PE": i.get("trailingPE"),
+            "PB": i.get("priceToBook")
+        })
+
+    except:
+        pass
+
+peer_df = pd.DataFrame(peer_data)
+
+st.dataframe(peer_df)
